@@ -29,6 +29,7 @@ venv/
 ENV/
 VENV/
 .venv/
+leetcode_scraper/
 .leetcode_scraper/
 
 # pipenv and poetry
