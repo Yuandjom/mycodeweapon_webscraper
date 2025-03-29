@@ -44,7 +44,7 @@ pip install -r requirements.txt
 ## Run the app
 
 ```bash
-uvicorn leetcode_scraper.main:app --reload
+uvicorn main:app --reload     
 ```
 
 The FastAPI server will be available at:

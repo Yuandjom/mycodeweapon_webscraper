@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import time
 import random
 from bs4 import BeautifulSoup
@@ -8,7 +11,7 @@ from bs4 import BeautifulSoup
 app = FastAPI()
 
 def get_structured_text(slug: str) -> dict:
-    """Mimic human-like behavior to scrape and extract structured text from a LeetCode problem page."""
+    """Scrape and extract structured text and metadata from a LeetCode problem page."""
     url = f"https://leetcode.com/problems/{slug}/description/"
 
     chrome_options = Options()
@@ -28,38 +31,33 @@ def get_structured_text(slug: str) -> dict:
     driver.get(url)
 
     try:
-        time.sleep(random.uniform(2, 4))  # Randomized sleep to mimic human loading time
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")  # Simulate scrolling
-        time.sleep(random.uniform(2, 4))  # Wait for elements to load
+        time.sleep(random.uniform(2, 4))  # Randomized delay
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(random.uniform(2, 4))
 
-        html = driver.page_source  # Get full page HTML
-        
-        # Parse the HTML using BeautifulSoup
-        soup = BeautifulSoup(html, "html.parser")
-        text_content = soup.get_text(separator=" ")  # Extract all text with spaces
-        
-        # Extract structured information
-        title = soup.find("div", class_="text-title-large").text.strip() if soup.find("div", class_="text-title-large") else "Title Not Found"
-        # difficulty = soup.find("div", class_="text-difficulty").text.strip() if soup.find("div", class_="text-difficulty") else "Difficulty Not Found"
-        # Extract difficulty from title text
-        # Extract structured information from the raw text
-        lines = text_content.split("\n")
-        clean_lines = [line.strip() for line in lines if line.strip()]
-        difficulty_lines = clean_lines[0]
-        print(difficulty_lines)
-        if "Easy" in difficulty_lines:
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        text_content = soup.get_text(separator=" ")
+
+        # Title
+        title_element = soup.find("div", class_="text-title-large")
+        title = title_element.text.strip() if title_element else "Title Not Found"
+
+        # Difficulty
+        difficulty_line = text_content.split("\n")[0]
+        if "Easy" in difficulty_line:
             difficulty = "Easy"
-        elif "Medium" in difficulty_lines:
+        elif "Medium" in difficulty_line:
             difficulty = "Medium"
-        elif "Hard" in difficulty_lines:
+        elif "Hard" in difficulty_line:
             difficulty = "Hard"
         else:
-            difficulty = "Difficulty Not Found"        # Extract description
+            difficulty = "Difficulty Not Found"
 
+        # Description extraction
         description_element = soup.find("div", class_="elfjS")
         full_description = description_element.text.strip() if description_element else "Description Not Found"
-        
-        # Description block: stop at first keyword
+
+        # Clean description block
         cutoff_keywords = ["Example", "Examples", "Constraints:", "Follow-up:"]
         cutoff_index = len(full_description)
         for keyword in cutoff_keywords:
@@ -68,17 +66,15 @@ def get_structured_text(slug: str) -> dict:
                 cutoff_index = min(cutoff_index, idx)
         description = full_description[:cutoff_index].strip()
 
-        # Extract examples dynamically
+        # Examples
         examples = []
         example_blocks = full_description.split("\nExample ")
         if len(example_blocks) > 1:
             for example in example_blocks[1:]:
                 examples.append("Example " + example.strip().replace("\n", " "))
 
-        # Extract constraints and follow-up
+        # Constraints
         constraints = []
-        follow_up = "Follow-up Not Found"
-
         if "Constraints:" in full_description:
             constraints_section = full_description.split("Constraints:")[1]
             constraints_lines = constraints_section.split("\n")
@@ -86,10 +82,32 @@ def get_structured_text(slug: str) -> dict:
                 if line.strip() and "Follow-up:" not in line:
                     constraints.append(line.strip())
 
+        # Follow-up
+        follow_up = "Follow-up Not Found"
         if "Follow-up:" in full_description:
             follow_up_section = full_description.split("Follow-up:")[1]
-            follow_up = follow_up_section.strip().split("\n")[0]  # Get only the first sentence
-        # description = description.split("\nExample ")[0][0]
+            follow_up = follow_up_section.strip().split("\n")[0]
+
+        # Hints (LeetCode-style block hints using lightbulb icon as anchor)
+        hints = []
+        try:
+            # Re-parse HTML after page load
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+
+            # Find all hint containers with specific class
+            hint_divs = soup.select("div.text-body.text-sd-foreground.mt-2.pl-7.elfjS")
+
+            for div in hint_divs:
+                text = div.get_text(separator=" ").strip()
+                if text:
+                    hints.append(text)
+
+            if not hints:
+                hints = ["No visible hints found."]
+        except Exception as e:
+            hints = [f"Failed to extract hints: {str(e)}"]
+
+
     finally:
         driver.quit()
 
@@ -100,9 +118,9 @@ def get_structured_text(slug: str) -> dict:
         "examples": examples,
         "constraints": constraints if constraints else ["Constraints Not Found"],
         "follow_up": follow_up,
-        "testing": difficulty_lines,
+        "hints": hints,
+        "testing": difficulty_line,
         "full_description": full_description,
-
     }
 
 @app.get("/leetcode/structured_text/{slug}")
