@@ -1,32 +1,37 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import time
 import random
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
-import re
 
 app = FastAPI()
 
-def extract_slug_from_url(leetcode_url: str) -> str:
-    """Extract the slug from a valid LeetCode problem description URL."""
-    parsed = urlparse(leetcode_url)
-    if not parsed.netloc.endswith("leetcode.com"):
-        raise ValueError("URL must be from leetcode.com")
-    match = re.match(r"^/problems/([^/]+)/description/?$", parsed.path)
-    if not match:
-        raise ValueError("URL must be a valid LeetCode problem description link")
-    return match.group(1)
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust for production use
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def get_structured_text(slug: str) -> dict:
-    url = f"https://leetcode.com/problems/{slug}/description/"
+def get_structured_text(url: str) -> dict:
+    """Scrape and extract structured text and metadata from a LeetCode problem page."""
+
+    # Validate and normalize URL
+    if not url.startswith("https://leetcode.com/problems/"):
+        raise ValueError("Invalid LeetCode problem URL")
 
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36",
@@ -73,7 +78,15 @@ def get_structured_text(slug: str) -> dict:
         example_blocks = full_description.split("\nExample ")
         if len(example_blocks) > 1:
             for example in example_blocks[1:]:
-                examples.append("Example " + example.strip().replace("\n", " "))
+                lines = example.strip().split("\n")
+                input_text = ""
+                output_text = ""
+                for line in lines:
+                    if line.strip().startswith("Input"):
+                        input_text = line.replace("Input:", "").strip()
+                    elif line.strip().startswith("Output"):
+                        output_text = line.replace("Output:", "").strip()
+                examples.append({"input": input_text, "output": output_text})
 
         constraints = []
         if "Constraints:" in full_description:
@@ -89,16 +102,14 @@ def get_structured_text(slug: str) -> dict:
             follow_up = follow_up_section.strip().split("\n")[0]
 
         hints = []
-        try:
-            hint_divs = soup.select("div.text-body.text-sd-foreground.mt-2.pl-7.elfjS")
-            for div in hint_divs:
-                text = div.get_text(separator=" ").strip()
-                if text:
-                    hints.append(text)
-            if not hints:
-                hints = ["No visible hints found."]
-        except Exception as e:
-            hints = [f"Failed to extract hints: {str(e)}"]
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        hint_divs = soup.select("div.text-body.text-sd-foreground.mt-2.pl-7.elfjS")
+        for div in hint_divs:
+            text = div.get_text(separator=" ").strip()
+            if text:
+                hints.append(text)
+        if not hints:
+            hints = ["No visible hints found."]
 
     finally:
         driver.quit()
@@ -116,22 +127,12 @@ def get_structured_text(slug: str) -> dict:
     }
 
 @app.get("/leetcode/scrape")
-def scrape_structured_text(url: str = Query(..., description="Full LeetCode problem URL")):
-    """
-    Accepts a full LeetCode URL, validates it, and returns structured problem data.
-    Example: GET /leetcode/scrape?url=https://leetcode.com/problems/two-sum/description/
-    """
-    try:
-        slug = extract_slug_from_url(url)
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-
-    return get_structured_text(slug)
+def scrape_structured_text(url: str = Query(..., description="LeetCode problem URL")):
+    return get_structured_text(url)
 
 @app.get("/")
 def welcome():
     return {
         "message": "👋 Welcome to the LeetCode Scraper API!",
-        "usage": "Use the endpoint /leetcode/scrape?url=https://leetcode.com/problems/your-problem/description/",
-        "note": "Make sure to paste a valid LeetCode problem URL that ends with /description/"
+        "usage": "Use /leetcode/scrape?url=https://leetcode.com/problems/two-sum/description/",
     }
