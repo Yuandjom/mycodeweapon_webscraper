@@ -81,13 +81,20 @@ def get_structured_text(url: str) -> dict:
                 lines = example.strip().split("\n")
                 input_text = ""
                 output_text = ""
+                explanation_text = ""
                 for line in lines:
                     if line.strip().startswith("Input"):
                         input_text = line.replace("Input:", "").strip()
                     elif line.strip().startswith("Output"):
                         output_text = line.replace("Output:", "").strip()
-                examples.append({"input": input_text, "output": output_text})
-
+                    elif line.strip().startswith("Explanation"):
+                        explanation_text = line.replace("Explanation:", "").strip()
+                examples.append({
+                    "input": input_text,
+                    "output": output_text,
+                    "explanation": explanation_text
+                })
+                
         constraints = []
         if "Constraints:" in full_description:
             constraints_section = full_description.split("Constraints:")[1]
